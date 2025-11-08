@@ -5,9 +5,36 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const port = process.env.PORT || 3000;
 
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./smart-deals-firebase-admin-key.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+
 //middleware
 app.use(cors());
 app.use(express.json());
+
+const verifyFireBaseToken = async (req, res, next) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) {
+    return res.status(401).send({ message: 'unauthorized access' })
+  }
+  const token = authorization.split(' ')[1];
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    console.log('inside token', decoded)
+    req.token_email = decoded.email;
+    next();
+  }
+  catch (error) {
+    return res.status(401).send({ message: 'unauthorized access' })
+  }
+}
 
 const uri = process.env.MONGODB_URI;
 
@@ -87,7 +114,8 @@ async function run() {
     });
 
     // post api
-    app.post("/products", async (req, res) => {
+    app.post("/products", verifyFireBaseToken, async (req, res) => {
+      console.log('headers in the post', req.headers);
       const newProduct = req.body;
       const result = await productsCollection.insertOne(newProduct);
       res.send(result);
@@ -119,18 +147,39 @@ async function run() {
 
     //bids related API
     // bids by email
-    app.get("/bids", async (req, res) => {
+    // app.get("/bids", verifyFireBaseToken, async (req, res) => {
+      //   const email = req.query.email;
+      //   const query = {};
+    //    if (email) {
+    //     query.buyer_email = email;
+    //     if (email !== req.token.email) {
+    //       return res.status(403).send({ message: 'forbidden access' })
+    //     }
+    //   }
+    //   const cursor = bidsCollection.find(query);
+    //   const result = await cursor.toArray();
+    //   res.send(result);
+    // });
+
+    // bids related apis
+    app.get('/bids', verifyFireBaseToken, async (req, res) => {
       const email = req.query.email;
       const query = {};
       if (email) {
         query.buyer_email = email;
+        if (email !== req.token_email) {
+          return res.status(403).send({ message: 'forbidden access' })
+        }
       }
+
       const cursor = bidsCollection.find(query);
       const result = await cursor.toArray();
       res.send(result);
-    });
+    })
 
-    // bid by products
+
+
+    // bid by products by id
     app.get("/products/bids/:productId", async (req, res) => {
       const productId = req.params.productId;
       const query = { product: productId };
@@ -142,16 +191,16 @@ async function run() {
     });
 
     //bid my account
-    app.get('/bids', async (req, res) => {
+    // app.get('/bids', async (req, res) => {
 
-      const query = {};
-      if (query.email) {
-        query.buyer_email = email
-      }
-      const cursor = bidsCollection.find(query);
-      const result = await cursor.toArray();
-      res.send(result)
-    })
+    //   const query = {};
+    //   if (query.email) {
+    //     query.buyer_email = email
+    //   }
+    //   const cursor = bidsCollection.find(query);
+    //   const result = await cursor.toArray();
+    //   res.send(result)
+    // })
 
     // bid post API
     app.post("/bids", async (req, res) => {
